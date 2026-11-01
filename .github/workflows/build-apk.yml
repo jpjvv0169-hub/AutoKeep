@@ -33,6 +33,10 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Generate AutoKeep app icon
+        run: dart run flutter_launcher_icons
+
+
       - name: Restore signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.AUTOKEEP_KEYSTORE_BASE64 }}
