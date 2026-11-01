@@ -1,5 +1,8 @@
+
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -9,40 +12,55 @@ void main() {
 
 class AutoKeepApp extends StatelessWidget {
   const AutoKeepApp({super.key});
+
   @override
-  Widget build(BuildContext context) => MaterialApp(
-        title: 'AutoKeep',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF006D63)),
-          useMaterial3: true,
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'AutoKeep',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF006D63),
         ),
-        home: const HomePage(),
-      );
+        useMaterial3: true,
+      ),
+      home: const HomePage(),
+    );
+  }
 }
 
-int asInt(dynamic value, int fallback) =>
-    value is num ? value.toInt() : int.tryParse('$value') ?? fallback;
+int readInt(dynamic value, [int fallback = 0]) {
+  if (value is num) return value.toInt();
+  return int.tryParse('$value') ?? fallback;
+}
 
-double asDouble(dynamic value, double fallback) =>
-    value is num ? value.toDouble() : double.tryParse('$value') ?? fallback;
-
-String dateLabel(DateTime date) =>
-    '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+double readDouble(dynamic value) {
+  if (value is num) return value.toDouble();
+  return double.tryParse('$value') ?? 0;
+}
 
 class ServiceRecord {
   String description;
   int mileage;
   double cost;
   DateTime date;
-  ServiceRecord(this.description, this.mileage, this.cost, this.date);
 
-  factory ServiceRecord.fromJson(Map<String, dynamic> data) => ServiceRecord(
-        '${data['description'] ?? 'Service'}',
-        asInt(data['mileage'], 0),
-        asDouble(data['cost'], 0),
-        DateTime.tryParse('${data['date']}') ?? DateTime.now(),
-      );
+  ServiceRecord({
+    required this.description,
+    required this.mileage,
+    required this.cost,
+    required this.date,
+  });
+
+  factory ServiceRecord.fromJson(Map<String, dynamic> json) {
+    return ServiceRecord(
+      description: '${json['description'] ?? 'Service'}',
+      mileage: readInt(json['mileage']),
+      cost: readDouble(json['cost']),
+      date: DateTime.tryParse('${json['date']}') ??
+          DateTime.now(),
+    );
+  }
 
   Map<String, dynamic> toJson() => {
         'description': description,
@@ -59,21 +77,33 @@ class Vehicle {
   int interval;
   int lastService;
   List<ServiceRecord> history;
-  Vehicle(this.name, this.registration, this.mileage, this.interval,
-      this.lastService, this.history);
 
-  factory Vehicle.fromJson(Map<String, dynamic> data) {
-    final km = asInt(data['mileage'], 0);
-    final interval = asInt(data['interval'], 10000);
+  Vehicle({
+    required this.name,
+    required this.registration,
+    required this.mileage,
+    required this.interval,
+    required this.lastService,
+    required this.history,
+  });
+
+  factory Vehicle.fromJson(Map<String, dynamic> json) {
+    final km = readInt(json['mileage']);
+    final gap = readInt(json['interval'], 10000);
+
     return Vehicle(
-      '${data['name'] ?? 'Vehicle'}',
-      '${data['registration'] ?? ''}',
-      km,
-      interval > 0 ? interval : 10000,
-      asInt(data['lastService'], km),
-      (data['history'] is List ? data['history'] as List : <dynamic>[])
+      name: '${json['name'] ?? 'Vehicle'}',
+      registration: '${json['registration'] ?? ''}',
+      mileage: km,
+      interval: gap > 0 ? gap : 10000,
+      lastService: readInt(json['lastService'], km),
+      history: (json['history'] is List
+              ? json['history'] as List
+              : <dynamic>[])
           .whereType<Map>()
-          .map((e) => ServiceRecord.fromJson(Map<String, dynamic>.from(e)))
+          .map((item) => ServiceRecord.fromJson(
+                Map<String, dynamic>.from(item),
+              ))
           .toList(),
     );
   }
@@ -84,177 +114,425 @@ class Vehicle {
         'mileage': mileage,
         'interval': interval,
         'lastService': lastService,
-        'history': history.map((e) => e.toJson()).toList(),
+        'history': history.map((s) => s.toJson()).toList(),
       };
+
   int get nextService => lastService + interval;
   int get remaining => nextService - mileage;
-  Vehicle copy() => Vehicle(name, registration, mileage, interval, lastService,
-      history.map((e) => ServiceRecord(e.description, e.mileage, e.cost, e.date)).toList());
 }
 
-Future<bool> confirmDelete(BuildContext context, String item) async {
+String formatDate(DateTime date) {
+  return '${date.day.toString().padLeft(2, '0')}/'
+      '${date.month.toString().padLeft(2, '0')}/'
+      '${date.year}';
+}
+
+void showMessage(BuildContext context, String message) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(message)),
+  );
+}
+
+Future<bool> confirmAction(
+  BuildContext context,
+  String title,
+  String message,
+) async {
   return await showDialog<bool>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text('Delete $item?'),
-          content: const Text('This cannot be undone.'),
+        builder: (dialogContext) => AlertDialog(
+          title: Text(title),
+          content: Text(message),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
             TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete', style: TextStyle(color: Colors.red)),
+              onPressed: () =>
+                  Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.pop(dialogContext, true),
+              child: const Text('Confirm'),
             ),
           ],
         ),
-      ) ?? false;
+      ) ??
+      false;
+}
+
+Widget formField(
+  TextEditingController controller,
+  String label, {
+  bool numeric = false,
+}) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: TextField(
+      controller: controller,
+      keyboardType:
+          numeric ? TextInputType.number : TextInputType.text,
+      decoration: InputDecoration(
+        labelText: label,
+        border: const OutlineInputBorder(),
+      ),
+    ),
+  );
 }
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
-  final List<Vehicle> vehicles = [];
+  List<Vehicle> vehicles = [];
   bool loading = true;
+
   @override
   void initState() {
     super.initState();
-    load();
+    loadVehicles();
   }
 
-  Future<void> load() async {
+  Future<void> loadVehicles() async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('vehicles');
-    if (!mounted) return;
-    setState(() {
+
+    try {
+      final raw = prefs.getString('vehicles');
       if (raw != null) {
-        try {
-          final items = jsonDecode(raw) as List;
-          vehicles.addAll(items.whereType<Map>().map(
-              (e) => Vehicle.fromJson(Map<String, dynamic>.from(e))));
-        } catch (e) {
-          debugPrint('Could not load vehicles: $e');
+        final data = jsonDecode(raw);
+        if (data is List) {
+          vehicles = data
+              .whereType<Map>()
+              .map((item) => Vehicle.fromJson(
+                    Map<String, dynamic>.from(item),
+                  ))
+              .toList();
         }
       }
-      loading = false;
-    });
+    } catch (error) {
+      debugPrint('Vehicle loading failed: $error');
+      if (mounted) {
+        showMessage(context, 'Could not read saved vehicles');
+      }
+    }
+
+    if (mounted) setState(() => loading = false);
   }
 
-  Future<void> persist() async {
+  Future<void> saveVehicles() async {
     final prefs = await SharedPreferences.getInstance();
-    final ok = await prefs.setString('vehicles',
-        jsonEncode(vehicles.map((e) => e.toJson()).toList()));
-    if (!ok) throw Exception('Unable to save data');
+    final data = jsonEncode(
+      vehicles.map((v) => v.toJson()).toList(),
+    );
+
+    final success = await prefs.setString('vehicles', data);
+    if (!success) throw Exception('Could not save data');
   }
 
-  void showError(Object error) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Save failed: $error')),
-      );
+  Future<void> saveChange(
+    void Function() update,
+  ) async {
+    final previous = jsonEncode(
+      vehicles.map((v) => v.toJson()).toList(),
+    );
+
+    try {
+      update();
+      await saveVehicles();
+      if (mounted) setState(() {});
+    } catch (error) {
+      vehicles = (jsonDecode(previous) as List)
+          .map((item) => Vehicle.fromJson(
+                Map<String, dynamic>.from(item),
+              ))
+          .toList();
+
+      if (mounted) {
+        setState(() {});
+        showMessage(context, 'Save failed: $error');
+      }
     }
   }
 
   Future<void> addVehicle() async {
-    // Free users may register one vehicle. Existing data is never deleted.
     if (vehicles.isNotEmpty) {
-      await Navigator.push<void>(context,
-          MaterialPageRoute(builder: (_) => const UpgradePage()));
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const ProPage(),
+        ),
+      );
       return;
     }
-    final created = await Navigator.push<Vehicle>(context,
-        MaterialPageRoute(builder: (_) => const VehicleFormPage()));
-    if (created == null || !mounted) return;
-    setState(() => vehicles.add(created));
+
+    final result = await Navigator.push<Vehicle>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const VehicleForm(),
+      ),
+    );
+
+    if (result != null) {
+      await saveChange(() => vehicles.add(result));
+    }
+  }
+
+  Future<void> copyBackup() async {
+    final backup = jsonEncode({
+      'format': 'AutoKeepBackup',
+      'version': 1,
+      'vehicles': vehicles.map((v) => v.toJson()).toList(),
+    });
+
+    await Clipboard.setData(ClipboardData(text: backup));
+
+    if (mounted) {
+      showMessage(
+        context,
+        'Backup copied. Save it in a secure text file.',
+      );
+    }
+  }
+
+  Future<void> restoreBackup() async {
+    final controller = TextEditingController();
+
+    final input = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Restore Backup'),
+        content: TextField(
+          controller: controller,
+          maxLines: 7,
+          decoration: const InputDecoration(
+            hintText: 'Paste your AutoKeep backup here',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(
+              dialogContext,
+              controller.text,
+            ),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+
+    controller.dispose();
+
+    if (input == null || input.trim().isEmpty || !mounted) {
+      return;
+    }
+
     try {
-      await persist();
-    } catch (e) {
-      if (mounted) setState(() => vehicles.remove(created));
-      showError(e);
+      final decoded = jsonDecode(input);
+
+      if (decoded is! Map ||
+          decoded['format'] != 'AutoKeepBackup' ||
+          decoded['vehicles'] is! List) {
+        throw const FormatException('Invalid backup');
+      }
+
+      final restored = (decoded['vehicles'] as List)
+          .map((item) => Vehicle.fromJson(
+                Map<String, dynamic>.from(item as Map),
+              ))
+          .toList();
+
+      final confirmed = await confirmAction(
+        context,
+        'Replace existing data?',
+        'All current vehicles and service records '
+            'will be replaced by this backup.',
+      );
+
+      if (!confirmed) return;
+
+      await saveChange(() => vehicles = restored);
+
+      if (mounted) showMessage(context, 'Restore completed');
+    } catch (error) {
+      if (mounted) {
+        showMessage(context, 'Invalid backup: $error');
+      }
     }
   }
 
   Future<void> openVehicle(Vehicle vehicle) async {
-    await Navigator.push(context, MaterialPageRoute(
-      builder: (_) => VehicleDetailsPage(
-        vehicle: vehicle,
-        persist: persist,
-        deleteVehicle: () async {
-          final index = vehicles.indexOf(vehicle);
-          if (index < 0) return false;
-          setState(() => vehicles.removeAt(index));
-          try {
-            await persist();
-            return true;
-          } catch (e) {
-            if (mounted) setState(() => vehicles.insert(index, vehicle));
-            showError(e);
-            return false;
-          }
-        },
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VehicleDetailsPage(
+          vehicle: vehicle,
+          onSave: saveVehicles,
+          onDelete: () async {
+            await saveChange(() => vehicles.remove(vehicle));
+          },
+        ),
       ),
-    ));
+    );
+
     if (mounted) setState(() {});
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('AutoKeep'), centerTitle: true),
-        body: loading
-            ? const Center(child: CircularProgressIndicator())
-            : vehicles.isEmpty
-                ? const Center(child: Text('No vehicles yet.\nTap + to add a vehicle.',
-                    textAlign: TextAlign.center))
-                : ListView.builder(
-                    padding: const EdgeInsets.all(12),
-                    itemCount: vehicles.length,
-                    itemBuilder: (context, index) {
-                      final v = vehicles[index];
-                      return Card(child: ListTile(
-                        leading: const Icon(Icons.directions_car),
-                        title: Text(v.name),
-                        subtitle: Text('${v.registration}\nCurrent: ${v.mileage} km | Next: ${v.nextService} km'),
-                        isThreeLine: true,
-                        trailing: Icon(v.remaining <= 0
-                            ? Icons.warning_amber : Icons.chevron_right,
-                            color: v.remaining <= 0 ? Colors.red : null),
-                        onTap: () => openVehicle(v),
-                      ));
-                    },
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('AutoKeep'),
+        centerTitle: true,
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'backup') copyBackup();
+              if (value == 'restore') restoreBackup();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'backup',
+                child: Text('Copy Backup'),
+              ),
+              PopupMenuItem(
+                value: 'restore',
+                child: Text('Restore Backup'),
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : vehicles.isEmpty
+              ? const Center(
+                  child: Text(
+                    'No vehicles yet.\nTap Add Vehicle.',
+                    textAlign: TextAlign.center,
                   ),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: addVehicle,
-          icon: const Icon(Icons.add),
-          label: const Text('Add Vehicle'),
-        ),
-      );
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: vehicles.length,
+                  itemBuilder: (context, index) {
+                    final vehicle = vehicles[index];
+
+                    return Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.directions_car),
+                        title: Text(vehicle.name),
+                        subtitle: Text(
+                          '${vehicle.registration}\n'
+                          'Current: ${vehicle.mileage} km | '
+                          'Next: ${vehicle.nextService} km',
+                        ),
+                        isThreeLine: true,
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => openVehicle(vehicle),
+                      ),
+                    );
+                  },
+                ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: addVehicle,
+        icon: const Icon(Icons.add),
+        label: const Text('Add Vehicle'),
+      ),
+    );
+  }
 }
 
-class VehicleFormPage extends StatefulWidget {
-  final Vehicle? existing;
-  const VehicleFormPage({super.key, this.existing});
+class ProPage extends StatelessWidget {
+  const ProPage({super.key});
+
   @override
-  State<VehicleFormPage> createState() => _VehicleFormPageState();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('AutoKeep Pro')),
+      body: const Padding(
+        padding: EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Icon(
+              Icons.workspace_premium,
+              size: 80,
+              color: Color(0xFF006D63),
+            ),
+            SizedBox(height: 20),
+            Text(
+              'Free includes 1 vehicle',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Upgrade to AutoKeep Pro for unlimited vehicles.',
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Planned price: R39.99 per month',
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 24),
+            Text(
+              'Subscriptions are not active in this test build. '
+              'No payment will be taken.',
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-class _VehicleFormPageState extends State<VehicleFormPage> {
+class VehicleForm extends StatefulWidget {
+  final Vehicle? vehicle;
+
+  const VehicleForm({super.key, this.vehicle});
+
+  @override
+  State<VehicleForm> createState() => _VehicleFormState();
+}
+
+class _VehicleFormState extends State<VehicleForm> {
   late final TextEditingController name;
   late final TextEditingController registration;
   late final TextEditingController mileage;
-  late final TextEditingController lastService;
   late final TextEditingController interval;
+  late final TextEditingController lastService;
 
   @override
   void initState() {
     super.initState();
-    final v = widget.existing;
+
+    final v = widget.vehicle;
+
     name = TextEditingController(text: v?.name ?? '');
-    registration = TextEditingController(text: v?.registration ?? '');
-    mileage = TextEditingController(text: v == null ? '' : '${v.mileage}');
-    lastService = TextEditingController(text: v == null ? '' : '${v.lastService}');
-    interval = TextEditingController(text: '${v?.interval ?? 10000}');
+    registration = TextEditingController(
+      text: v?.registration ?? '',
+    );
+    mileage = TextEditingController(
+      text: v == null ? '' : '${v.mileage}',
+    );
+    interval = TextEditingController(
+      text: '${v?.interval ?? 10000}',
+    );
+    lastService = TextEditingController(
+      text: v == null ? '' : '${v.lastService}',
+    );
   }
 
   @override
@@ -262,74 +540,118 @@ class _VehicleFormPageState extends State<VehicleFormPage> {
     name.dispose();
     registration.dispose();
     mileage.dispose();
-    lastService.dispose();
     interval.dispose();
+    lastService.dispose();
     super.dispose();
   }
 
   void save() {
     final km = int.tryParse(mileage.text.trim());
-    final step = int.tryParse(interval.text.trim());
-    final last = lastService.text.trim().isEmpty
-        ? km : int.tryParse(lastService.text.trim());
-    final previous = widget.existing;
-    if (name.text.trim().isEmpty || km == null || km < 0 ||
-        (previous != null && km < previous.mileage) ||
-        step == null || step <= 0 || last == null || last < 0 || last > km) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Check details. Current mileage cannot decrease.'),
-      ));
+    final gap = int.tryParse(interval.text.trim());
+    final last = int.tryParse(lastService.text.trim());
+
+    if (name.text.trim().isEmpty ||
+        km == null ||
+        km < 0 ||
+        gap == null ||
+        gap <= 0 ||
+        last == null ||
+        last < 0 ||
+        last > km) {
+      showMessage(context, 'Enter valid vehicle details');
       return;
     }
-    Navigator.pop(context, Vehicle(
-      name.text.trim(), registration.text.trim(), km, step, last,
-      previous?.history ?? [],
-    ));
+
+    if (widget.vehicle != null &&
+        km < widget.vehicle!.mileage) {
+      showMessage(context, 'Mileage cannot decrease');
+      return;
+    }
+
+    Navigator.pop(
+      context,
+      Vehicle(
+        name: name.text.trim(),
+        registration: registration.text.trim(),
+        mileage: km,
+        interval: gap,
+        lastService: last,
+        history: widget.vehicle?.history.toList() ?? [],
+      ),
+    );
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Text(widget.existing == null ? 'Add Vehicle' : 'Edit Vehicle')),
-        body: ListView(padding: const EdgeInsets.all(16), children: [
-          TextField(controller: name, decoration: const InputDecoration(labelText: 'Make and Model')),
-          TextField(controller: registration, decoration: const InputDecoration(labelText: 'Registration Number')),
-          TextField(controller: mileage, keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Current Mileage (km)')),
-          TextField(controller: lastService, keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Last Service Mileage (km)',
-                  helperText: 'Leave blank when adding a newly serviced vehicle')),
-          TextField(controller: interval, keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Service Interval (km)')),
-          const SizedBox(height: 24),
-          FilledButton(onPressed: save, child: const Text('Save Vehicle')),
-        ]),
-      );
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          widget.vehicle == null ? 'Add Vehicle' : 'Edit Vehicle',
+        ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          formField(name, 'Make and Model'),
+          formField(registration, 'Registration Number'),
+          formField(mileage, 'Current Mileage', numeric: true),
+          formField(
+            lastService,
+            'Last Service Mileage',
+            numeric: true,
+          ),
+          formField(
+            interval,
+            'Service Interval (km)',
+            numeric: true,
+          ),
+          const SizedBox(height: 20),
+          FilledButton(
+            onPressed: save,
+            child: const Text('Save Vehicle'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class VehicleDetailsPage extends StatefulWidget {
   final Vehicle vehicle;
-  final Future<void> Function() persist;
-  final Future<bool> Function() deleteVehicle;
-  const VehicleDetailsPage({super.key, required this.vehicle,
-    required this.persist, required this.deleteVehicle});
+  final Future<void> Function() onSave;
+  final Future<void> Function() onDelete;
+
+  const VehicleDetailsPage({
+    super.key,
+    required this.vehicle,
+    required this.onSave,
+    required this.onDelete,
+  });
+
   @override
-  State<VehicleDetailsPage> createState() => _VehicleDetailsPageState();
+  State<VehicleDetailsPage> createState() =>
+      _VehicleDetailsPageState();
 }
 
-class _VehicleDetailsPageState extends State<VehicleDetailsPage> {
+class _VehicleDetailsPageState
+    extends State<VehicleDetailsPage> {
   bool busy = false;
 
-  Future<void> update(Future<void> Function() change, void Function() undo) async {
+  Future<void> commit(
+    void Function() update,
+    void Function() rollback,
+  ) async {
     setState(() => busy = true);
+    update();
+
     try {
-      await change();
-      await widget.persist();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Saved successfully')));
-    } catch (e) {
-      undo();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Save failed: $e')));
+      await widget.onSave();
+      if (mounted) setState(() {});
+    } catch (error) {
+      rollback();
+      if (mounted) {
+        showMessage(context, 'Save failed: $error');
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -337,295 +659,410 @@ class _VehicleDetailsPageState extends State<VehicleDetailsPage> {
 
   Future<void> editVehicle() async {
     final v = widget.vehicle;
-    final edited = await Navigator.push<Vehicle>(context,
-        MaterialPageRoute(builder: (_) => VehicleFormPage(existing: v)));
-    if (edited == null || !mounted) return;
-    final backup = v.copy();
-    await update(() async {
-      v.name = edited.name;
-      v.registration = edited.registration;
-      v.mileage = edited.mileage;
-      v.lastService = edited.lastService;
-      v.interval = edited.interval;
-    }, () {
-      v.name = backup.name;
-      v.registration = backup.registration;
-      v.mileage = backup.mileage;
-      v.lastService = backup.lastService;
-      v.interval = backup.interval;
-    });
+
+    final result = await Navigator.push<Vehicle>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VehicleForm(vehicle: v),
+      ),
+    );
+
+    if (result == null || !mounted) return;
+
+    final oldName = v.name;
+    final oldRegistration = v.registration;
+    final oldMileage = v.mileage;
+    final oldInterval = v.interval;
+    final oldLast = v.lastService;
+
+    await commit(
+      () {
+        v.name = result.name;
+        v.registration = result.registration;
+        v.mileage = result.mileage;
+        v.interval = result.interval;
+        v.lastService = result.lastService;
+      },
+      () {
+        v.name = oldName;
+        v.registration = oldRegistration;
+        v.mileage = oldMileage;
+        v.interval = oldInterval;
+        v.lastService = oldLast;
+      },
+    );
   }
 
   Future<void> updateMileage() async {
-    final v = widget.vehicle;
-    final km = await Navigator.push<int>(context,
-        MaterialPageRoute(builder: (_) => MileagePage(current: v.mileage)));
-    if (km == null || !mounted) return;
-    final previous = v.mileage;
-    await update(() async { v.mileage = km; }, () { v.mileage = previous; });
-  }
+    final controller = TextEditingController(
+      text: '${widget.vehicle.mileage}',
+    );
 
-  Future<void> serviceForm([int? index]) async {
-    final v = widget.vehicle;
-    final existing = index == null ? null : v.history[index];
-    final result = await Navigator.push<ServiceRecord>(context,
-        MaterialPageRoute(builder: (_) => ServiceFormPage(
-          existing: existing, currentMileage: v.mileage,
-        )));
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Update Mileage'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Current Mileage',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(
+              dialogContext,
+              controller.text,
+            ),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    controller.dispose();
+
     if (result == null || !mounted) return;
-    final oldHistory = List<ServiceRecord>.from(v.history);
-    final oldKm = v.mileage;
-    final oldLast = v.lastService;
-    await update(() async {
-      if (index == null) {
-        v.history.insert(0, result);
-      } else {
-        v.history[index] = result;
-      }
-      if (result.mileage > v.mileage) v.mileage = result.mileage;
-      // Keep the last service as the greatest recorded service mileage.
-      // If no records remain, preserve the manually entered baseline.
-      final latest = v.history.fold<int>(0,
-          (maxKm, item) => item.mileage > maxKm ? item.mileage : maxKm);
-      if (latest > 0) v.lastService = latest;
-    }, () {
-      v.history = oldHistory;
-      v.mileage = oldKm;
-      v.lastService = oldLast;
-    });
+
+    final km = int.tryParse(result.trim());
+
+    if (km == null || km < widget.vehicle.mileage) {
+      showMessage(context, 'Mileage cannot decrease');
+      return;
+    }
+
+    final old = widget.vehicle.mileage;
+
+    await commit(
+      () => widget.vehicle.mileage = km,
+      () => widget.vehicle.mileage = old,
+    );
   }
 
-  Future<void> deleteService(int index) async {
-    if (!await confirmDelete(context, 'service record') || !mounted) return;
+  Future<void> addOrEditService({
+    ServiceRecord? existing,
+  }) async {
+    final result = await Navigator.push<ServiceRecord>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ServiceForm(
+          existing: existing,
+          currentMileage: widget.vehicle.mileage,
+        ),
+      ),
+    );
+
+    if (result == null || !mounted) return;
+
     final v = widget.vehicle;
-    final previous = List<ServiceRecord>.from(v.history);
+    final oldHistory = List<ServiceRecord>.from(v.history);
+    final oldMileage = v.mileage;
     final oldLast = v.lastService;
-    await update(() async {
-      v.history.removeAt(index);
-      if (v.history.isNotEmpty) {
-        v.lastService = v.history.fold<int>(0,
-            (maxKm, item) => item.mileage > maxKm ? item.mileage : maxKm);
-      } else {
-        // Unknown baseline after removing the last record: mark as due.
-        // The owner can set the correct last service in Edit Vehicle.
-        v.lastService = 0;
-      }
-    }, () {
-      v.history = previous;
-      v.lastService = oldLast;
-    });
+
+    await commit(
+      () {
+        if (existing != null) v.history.remove(existing);
+
+        v.history.insert(0, result);
+
+        if (result.mileage > v.mileage) {
+          v.mileage = result.mileage;
+        }
+
+        recalculateLastService(v);
+      },
+      () {
+        v.history = oldHistory;
+        v.mileage = oldMileage;
+        v.lastService = oldLast;
+      },
+    );
+  }
+
+  void recalculateLastService(Vehicle v) {
+    if (v.history.isNotEmpty) {
+      v.lastService = v.history
+          .map((service) => service.mileage)
+          .reduce((a, b) => a > b ? a : b);
+    }
+  }
+
+  Future<void> deleteService(ServiceRecord service) async {
+    final confirmed = await confirmAction(
+      context,
+      'Delete Service?',
+      'This service record will be permanently removed.',
+    );
+
+    if (!confirmed) return;
+
+    final v = widget.vehicle;
+    final oldHistory = List<ServiceRecord>.from(v.history);
+    final oldLast = v.lastService;
+
+    await commit(
+      () {
+        v.history.remove(service);
+        recalculateLastService(v);
+      },
+      () {
+        v.history = oldHistory;
+        v.lastService = oldLast;
+      },
+    );
   }
 
   Future<void> deleteVehicle() async {
-    if (!await confirmDelete(context, 'vehicle and all service history') || !mounted) return;
-    setState(() => busy = true);
-    final deleted = await widget.deleteVehicle();
-    if (!mounted) return;
-    if (deleted) {
-      Navigator.pop(context);
-    } else {
-      setState(() => busy = false);
-    }
+    final confirmed = await confirmAction(
+      context,
+      'Delete Vehicle?',
+      'This deletes the vehicle and all its service history.',
+    );
+
+    if (!confirmed) return;
+
+    await widget.onDelete();
+
+    if (mounted) Navigator.pop(context);
   }
 
   @override
   Widget build(BuildContext context) {
     final v = widget.vehicle;
+
     return Scaffold(
-      appBar: AppBar(title: Text(v.name), actions: [
-        IconButton(tooltip: 'Edit Vehicle', onPressed: busy ? null : editVehicle,
-            icon: const Icon(Icons.edit)),
-        PopupMenuButton<String>(enabled: !busy, onSelected: (value) {
-          if (value == 'delete') deleteVehicle();
-        }, itemBuilder: (_) => [const PopupMenuItem(
-          value: 'delete', child: Text('Delete Vehicle'))]),
-      ]),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
-        Card(child: Padding(padding: const EdgeInsets.all(16),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(v.name, style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 8),
-            Text('Registration: ${v.registration}'),
-            Text('Current Mileage: ${v.mileage} km'),
-            Text('Last Service: ${v.lastService} km'),
-            Text('Next Service: ${v.nextService} km'),
-            const SizedBox(height: 8),
-            Text(v.remaining <= 0 ? 'SERVICE DUE' : '${v.remaining} km until next service',
-              style: TextStyle(color: v.remaining <= 0 ? Colors.red : Colors.green,
-                  fontWeight: FontWeight.bold)),
-          ]))),
-        const SizedBox(height: 16),
-        FilledButton.icon(onPressed: busy ? null : updateMileage,
-            icon: const Icon(Icons.speed), label: const Text('Update Mileage')),
-        FilledButton.icon(onPressed: busy ? null : () => serviceForm(),
-            icon: const Icon(Icons.build), label: const Text('Add Service')),
-        const SizedBox(height: 24),
-        Text('Service History', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 12),
-        if (v.history.isEmpty) const Text('No services recorded yet.'),
-        for (int i = 0; i < v.history.length; i++)
-          Card(child: ListTile(
-            leading: const Icon(Icons.build_circle_outlined),
-            title: Text(v.history[i].description),
-            subtitle: Text('${dateLabel(v.history[i].date)} | ${v.history[i].mileage} km'),
-            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-              Text(v.history[i].cost.toStringAsFixed(2)),
-              PopupMenuButton<String>(enabled: !busy, onSelected: (choice) {
-                if (choice == 'edit') serviceForm(i);
-                if (choice == 'delete') deleteService(i);
-              }, itemBuilder: (_) => const [
-                PopupMenuItem(value: 'edit', child: Text('Edit Service')),
-                PopupMenuItem(value: 'delete', child: Text('Delete Service')),
-              ]),
-            ]),
-            onTap: busy ? null : () => serviceForm(i),
-          )),
-      ]),
-    );
-  }
-}
-
-class MileagePage extends StatefulWidget {
-  final int current;
-  const MileagePage({super.key, required this.current});
-  @override
-  State<MileagePage> createState() => _MileagePageState();
-}
-
-class _MileagePageState extends State<MileagePage> {
-  late final TextEditingController controller;
-  @override
-  void initState() {
-    super.initState();
-    controller = TextEditingController(text: '${widget.current}');
-  }
-  @override
-  void dispose() { controller.dispose(); super.dispose(); }
-  void save() {
-    final km = int.tryParse(controller.text.trim());
-    if (km == null || km < widget.current) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Mileage cannot be lower than the current reading')));
-      return;
-    }
-    Navigator.pop(context, km);
-  }
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Update Mileage')),
-    body: ListView(padding: const EdgeInsets.all(16), children: [
-      TextField(controller: controller, keyboardType: TextInputType.number,
-        decoration: const InputDecoration(labelText: 'Current Mileage (km)')),
-      const SizedBox(height: 24),
-      FilledButton(onPressed: save, child: const Text('Save Mileage')),
-    ]),
-  );
-}
-
-class ServiceFormPage extends StatefulWidget {
-  final ServiceRecord? existing;
-  final int currentMileage;
-  const ServiceFormPage({super.key, this.existing, required this.currentMileage});
-  @override
-  State<ServiceFormPage> createState() => _ServiceFormPageState();
-}
-
-class _ServiceFormPageState extends State<ServiceFormPage> {
-  late final TextEditingController description;
-  late final TextEditingController mileage;
-  late final TextEditingController cost;
-  late DateTime date;
-  @override
-  void initState() {
-    super.initState();
-    final old = widget.existing;
-    description = TextEditingController(text: old?.description ?? '');
-    mileage = TextEditingController(text: '${old?.mileage ?? widget.currentMileage}');
-    cost = TextEditingController(text: '${old?.cost ?? 0}');
-    date = old?.date ?? DateTime.now();
-  }
-  @override
-  void dispose() {
-    description.dispose(); mileage.dispose(); cost.dispose(); super.dispose();
-  }
-  Future<void> chooseDate() async {
-    final chosen = await showDatePicker(context: context, initialDate: date,
-      firstDate: DateTime(1990), lastDate: DateTime.now());
-    if (chosen != null && mounted) setState(() => date = chosen);
-  }
-  void save() {
-    final km = int.tryParse(mileage.text.trim());
-    final amount = double.tryParse(cost.text.trim().replaceAll(',', '.'));
-    if (description.text.trim().isEmpty || km == null || km < 0 ||
-        amount == null || !amount.isFinite || amount < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Enter valid service details')));
-      return;
-    }
-    Navigator.pop(context, ServiceRecord(description.text.trim(), km, amount, date));
-  }
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(widget.existing == null ? 'Add Service' : 'Edit Service')),
-    body: ListView(padding: const EdgeInsets.all(16), children: [
-      TextField(controller: description,
-          decoration: const InputDecoration(labelText: 'Service Description')),
-      TextField(controller: mileage, keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'Mileage at Service')),
-      TextField(controller: cost,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(labelText: 'Service Cost')),
-      ListTile(leading: const Icon(Icons.calendar_month),
-          title: const Text('Service Date'), subtitle: Text(dateLabel(date)),
-          onTap: chooseDate),
-      const SizedBox(height: 24),
-      FilledButton(onPressed: save, child: const Text('Save Service')),
-    ]),
-  );
-}
-
-// Preview of the paid tier. No purchases are charged in this test build.
-// Before launch, integrate Google Play Billing and verify entitlements.
-class UpgradePage extends StatelessWidget {
-  const UpgradePage({super.key});
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('AutoKeep Pro')),
-        body: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 440),
+      appBar: AppBar(
+        title: Text(v.name),
+        actions: [
+          IconButton(
+            tooltip: 'Edit Vehicle',
+            onPressed: busy ? null : editVehicle,
+            icon: const Icon(Icons.edit),
+          ),
+          IconButton(
+            tooltip: 'Delete Vehicle',
+            onPressed: busy ? null : deleteVehicle,
+            icon: const Icon(Icons.delete_outline),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Card(
             child: Padding(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(16),
               child: Column(
-                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.workspace_premium, size: 72),
-                  const SizedBox(height: 16),
-                  Text('Upgrade to AutoKeep Pro',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.headlineSmall),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'The free plan includes one vehicle. '
-                    'Pro will allow unlimited vehicles.',
-                    textAlign: TextAlign.center,
+                  Text(
+                    v.name,
+                    style:
+                        Theme.of(context).textTheme.headlineSmall,
                   ),
-                  const SizedBox(height: 18),
-                  Text('Planned price: R39.99 / month',
-                      style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  const Text('Subscriptions are not yet available in this test version.',
-                      textAlign: TextAlign.center),
-                  const SizedBox(height: 24),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Back to my vehicle'),
+                  const SizedBox(height: 12),
+                  Text('Registration: ${v.registration}'),
+                  Text('Current Mileage: ${v.mileage} km'),
+                  Text('Last Service: ${v.lastService} km'),
+                  Text('Next Service: ${v.nextService} km'),
+                  const SizedBox(height: 12),
+                  Text(
+                    v.remaining <= 0
+                        ? 'SERVICE DUE'
+                        : '${v.remaining} km until next service',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: v.remaining <= 0
+                          ? Colors.red
+                          : Colors.green,
+                    ),
                   ),
                 ],
               ),
             ),
           ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: busy ? null : updateMileage,
+            icon: const Icon(Icons.speed),
+            label: const Text('Update Mileage'),
+          ),
+          FilledButton.icon(
+            onPressed: busy
+                ? null
+                : () => addOrEditService(),
+            icon: const Icon(Icons.build),
+            label: const Text('Add Service'),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            'Service History',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 12),
+          if (v.history.isEmpty)
+            const Text('No services recorded yet.'),
+          ...v.history.map(
+            (service) => Card(
+              child: ListTile(
+                title: Text(service.description),
+                subtitle: Text(
+                  '${formatDate(service.date)} | '
+                  '${service.mileage} km | '
+                  '${service.cost.toStringAsFixed(2)}',
+                ),
+                trailing: PopupMenuButton<String>(
+                  onSelected: (action) {
+                    if (action == 'edit') {
+                      addOrEditService(existing: service);
+                    } else {
+                      deleteService(service);
+                    }
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'edit',
+                      child: Text('Edit Service'),
+                    ),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Text('Delete Service'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ServiceForm extends StatefulWidget {
+  final ServiceRecord? existing;
+  final int currentMileage;
+
+  const ServiceForm({
+    super.key,
+    this.existing,
+    required this.currentMileage,
+  });
+
+  @override
+  State<ServiceForm> createState() => _ServiceFormState();
+}
+
+class _ServiceFormState extends State<ServiceForm> {
+  late final TextEditingController description;
+  late final TextEditingController mileage;
+  late final TextEditingController cost;
+  late DateTime serviceDate;
+
+  @override
+  void initState() {
+    super.initState();
+
+    final s = widget.existing;
+
+    description = TextEditingController(
+      text: s?.description ?? '',
+    );
+    mileage = TextEditingController(
+      text: '${s?.mileage ?? widget.currentMileage}',
+    );
+    cost = TextEditingController(
+      text: '${s?.cost ?? 0}',
+    );
+    serviceDate = s?.date ?? DateTime.now();
+  }
+
+  @override
+  void dispose() {
+    description.dispose();
+    mileage.dispose();
+    cost.dispose();
+    super.dispose();
+  }
+
+  void save() {
+    final km = int.tryParse(mileage.text.trim());
+    final amount = double.tryParse(
+      cost.text.trim().replaceAll(',', '.'),
+    );
+
+    if (description.text.trim().isEmpty ||
+        km == null ||
+        km < 0 ||
+        amount == null ||
+        !amount.isFinite ||
+        amount < 0) {
+      showMessage(context, 'Enter valid service details');
+      return;
+    }
+
+    Navigator.pop(
+      context,
+      ServiceRecord(
+        description: description.text.trim(),
+        mileage: km,
+        cost: amount,
+        date: serviceDate,
+      ),
+    );
+  }
+
+  Future<void> chooseDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: serviceDate,
+      firstDate: DateTime(1990),
+      lastDate: DateTime.now(),
+    );
+
+    if (picked != null && mounted) {
+      setState(() => serviceDate = picked);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          widget.existing == null
+              ? 'Add Service'
+              : 'Edit Service',
         ),
-      );
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          formField(description, 'Service Description'),
+          formField(
+            mileage,
+            'Mileage at Service',
+            numeric: true,
+          ),
+          formField(cost, 'Service Cost'),
+          ListTile(
+            title: const Text('Service Date'),
+            subtitle: Text(formatDate(serviceDate)),
+            trailing: const Icon(Icons.calendar_month),
+            onTap: chooseDate,
+          ),
+          const SizedBox(height: 20),
+          FilledButton(
+            onPressed: save,
+            child: const Text('Save Service'),
+          ),
+        ],
+      ),
+    );
+  }
 }
