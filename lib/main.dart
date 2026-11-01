@@ -150,10 +150,14 @@ class _HomePageState extends State<HomePage> {
       ),
     );
 
-    name.dispose();
-    registration.dispose();
-    mileage.dispose();
-    interval.dispose();
+    
+Future.delayed(const Duration(milliseconds: 500), () {
+  name.dispose();
+  registration.dispose();
+  mileage.dispose();
+  interval.dispose();
+});
+
 
     if (result != null) {
       setState(() => vehicles.add(result));
