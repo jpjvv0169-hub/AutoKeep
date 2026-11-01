@@ -119,6 +119,79 @@ class Vehicle {
 
   int get nextService => lastService + interval;
   int get remaining => nextService - mileage;
+
+  DateTime? get nextServiceDate {
+    if (history.isEmpty) return null;
+    final latest = history.map((s) => s.date).reduce(
+      (a, b) => a.isAfter(b) ? a : b,
+    );
+    final year = latest.year + 1;
+    final month = latest.month;
+    final lastDay = DateTime(year, month + 1, 0).day;
+    return DateTime(year, month,
+        latest.day > lastDay ? lastDay : latest.day);
+  }
+
+  
+bool get serviceDue {
+  final dueDate = nextServiceDate;
+  final dateOverdue = dueDate != null &&
+      DateTime.now().isAfter(dueDate);
+
+  return remaining <= 0 || dateOverdue;
+}
+
+bool get serviceSoon {
+  if (serviceDue) return false;
+
+  final dueDate = nextServiceDate;
+  final daysLeft = dueDate?.difference(DateTime.now()).inDays;
+
+  return remaining <= 2000 ||
+      (daysLeft != null && daysLeft <= 30);
+}
+
+String get serviceStatus {
+  if (serviceDue) return 'SERVICE DUE';
+  if (serviceSoon) return 'SERVICE SOON';
+  return 'UP TO DATE';
+}
+
+String get serviceReminder {
+  if (serviceDue) {
+    return 'Service is due. Check mileage and service date.';
+  }
+
+  if (serviceSoon) {
+    final dueDate = nextServiceDate;
+    final daysLeft = dueDate?.difference(DateTime.now()).inDays;
+
+    if (remaining <= 500) {
+      return 'Service due within 500 km';
+    }
+
+    if (remaining <= 1000) {
+      return 'Service due within 1,000 km';
+    }
+
+    if (remaining <= 2000) {
+      return 'Service due within 2,000 km';
+    }
+
+    if (daysLeft != null && daysLeft <= 30) {
+      return 'Service due within 30 days';
+    }
+  }
+
+  return 'Next service in $remaining km';
+}
+
+Color get serviceColor {
+  if (serviceDue) return Colors.red;
+  if (serviceSoon) return Colors.deepOrange;
+  return Colors.green;
+}
+
 }
 
 String formatDate(DateTime date) {
@@ -428,12 +501,27 @@ class _HomePageState extends State<HomePage> {
                       child: ListTile(
                         leading: const Icon(Icons.directions_car),
                         title: Text(vehicle.name),
-                        subtitle: Text(
-                          '${vehicle.registration}\n'
-                          'Current: ${vehicle.mileage} km | '
-                          'Next: ${vehicle.nextService} km',
-                        ),
-                        isThreeLine: true,
+                        
+subtitle: Column(
+  crossAxisAlignment: CrossAxisAlignment.start,
+  children: [
+    Text(vehicle.registration),
+    Text(
+      'Current: ${vehicle.mileage} km | '
+      'Next: ${vehicle.nextService} km',
+    ),
+    const SizedBox(height: 6),
+    Text(
+      vehicle.serviceStatus,
+      style: TextStyle(
+        color: vehicle.serviceColor,
+        fontWeight: FontWeight.bold,
+      ),
+    ),
+    Text(vehicle.serviceReminder),
+  ],
+),
+
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () => openVehicle(vehicle),
                       ),
@@ -482,7 +570,7 @@ class ProPage extends StatelessWidget {
             ),
             SizedBox(height: 16),
             Text(
-              'Planned price: R39.99 per month',
+              'Pro pricing will be shown in your local currency once available.',
               textAlign: TextAlign.center,
             ),
             SizedBox(height: 24),
@@ -545,7 +633,7 @@ class _VehicleFormState extends State<VehicleForm> {
     super.dispose();
   }
 
-  void save() {
+  Future<void> save() async {
     final km = int.tryParse(mileage.text.trim());
     final gap = int.tryParse(interval.text.trim());
     final last = int.tryParse(lastService.text.trim());
@@ -564,10 +652,17 @@ class _VehicleFormState extends State<VehicleForm> {
 
     if (widget.vehicle != null &&
         km < widget.vehicle!.mileage) {
-      showMessage(context, 'Mileage cannot decrease');
-      return;
+      final approved = await confirmAction(
+        context,
+        'Correct mileage?',
+        'You are changing the recorded mileage from '
+        '${widget.vehicle!.mileage} km to $km km. '
+        'Only continue if the earlier reading was entered incorrectly.',
+      );
+      if (!approved || !mounted) return;
     }
 
+    if (!mounted) return;
     Navigator.pop(
       context,
       Vehicle(
@@ -870,18 +965,29 @@ class _VehicleDetailsPageState
                   Text('Current Mileage: ${v.mileage} km'),
                   Text('Last Service: ${v.lastService} km'),
                   Text('Next Service: ${v.nextService} km'),
-                  const SizedBox(height: 12),
-                  Text(
-                    v.remaining <= 0
-                        ? 'SERVICE DUE'
-                        : '${v.remaining} km until next service',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: v.remaining <= 0
-                          ? Colors.red
-                          : Colors.green,
-                    ),
-                  ),
+                  if (v.nextServiceDate != null)
+                    Text('Next Service Date (12-month estimate): '
+                        '${formatDate(v.nextServiceDate!)}'),
+                  const SizedBox(height: 8),
+                  
+Text(
+  v.serviceStatus,
+  style: TextStyle(
+    fontWeight: FontWeight.bold,
+    color: v.serviceColor,
+    fontSize: 18,
+  ),
+),
+const SizedBox(height: 6),
+Text(
+  v.serviceReminder,
+  style: TextStyle(
+    color: v.serviceColor,
+    fontWeight: FontWeight.w500,
+  ),
+),
+
+                  
                 ],
               ),
             ),
@@ -990,7 +1096,7 @@ class _ServiceFormState extends State<ServiceForm> {
     super.dispose();
   }
 
-  void save() {
+  Future<void> save() async {
     final km = int.tryParse(mileage.text.trim());
     final amount = double.tryParse(
       cost.text.trim().replaceAll(',', '.'),
