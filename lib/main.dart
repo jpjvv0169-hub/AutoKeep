@@ -725,7 +725,7 @@ class _VehicleDetailsPageState
       ),
     );
 
-    controller.dispose();
+    // controller.dispose();
 
     if (result == null || !mounted) return;
 
