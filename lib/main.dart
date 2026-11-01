@@ -1,485 +1,174 @@
-
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  runApp(const AutoKeepApp());
+class JobCardFinancePage extends StatefulWidget {
+  const JobCardFinancePage({super.key, required this.businessId, required this.jobCardId, this.currency = 'ZAR'});
+  final String businessId, jobCardId, currency;
+  @override
+  State<JobCardFinancePage> createState() => _JobCardFinancePageState();
 }
 
-class AutoKeepApp extends StatelessWidget {
-  const AutoKeepApp({super.key});
+class _JobCardFinancePageState extends State<JobCardFinancePage> {
+  final client = Supabase.instance.client;
+  bool loading = true, busy = false;
+  String? error;
+  List<Map<String, dynamic>> labour = [], parts = [], staff = [];
+  Map<String, dynamic>? summary;
+
+  String money(num amount) => '${widget.currency} ${amount.toStringAsFixed(2)}';
+  num asNum(dynamic v) => v is num ? v : num.tryParse('$v') ?? 0;
+  num amount(dynamic quantity, dynamic minor) => asNum(quantity) * asNum(minor) / 100;
+  String fmt(dynamic quantity, dynamic minor) => money(amount(quantity, minor));
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'AutoKeep',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF176B61),
-        ),
-        useMaterial3: true,
-      ),
-      home: const HomePage(),
-    );
-  }
-}
+  void initState() { super.initState(); reload(); }
 
-class HomePage extends StatefulWidget {
-  const HomePage({super.key});
-
-  @override
-  State<HomePage> createState() => _HomePageState();
-}
-
-class _HomePageState extends State<HomePage> {
-  List<Map<String, dynamic>> vehicles = [];
-  bool loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    loadVehicles();
-  }
-
-  Future<void> loadVehicles() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('vehicles');
-
-    if (!mounted) return;
-
-    setState(() {
-      if (raw != null) {
-        try {
-          vehicles = (jsonDecode(raw) as List)
-              .map((e) => Map<String, dynamic>.from(e as Map))
-              .toList();
-        } catch (_) {
-          vehicles = [];
-        }
-      }
-      loading = false;
-    });
-  }
-
-  Future<void> saveVehicles() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('vehicles', jsonEncode(vehicles));
-  }
-
-  Future<void> addVehicle() async {
-    final name = TextEditingController();
-    final registration = TextEditingController();
-    final mileage = TextEditingController();
-    final interval = TextEditingController(text: '10000');
-
-    final result = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Add Vehicle'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: name,
-                decoration: const InputDecoration(
-                  labelText: 'Make and Model',
-                ),
-              ),
-              TextField(
-                controller: registration,
-                decoration: const InputDecoration(
-                  labelText: 'Registration Number',
-                ),
-              ),
-              TextField(
-                controller: mileage,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Current Mileage (km)',
-                ),
-              ),
-              TextField(
-                controller: interval,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Service Interval (km)',
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final km = int.tryParse(mileage.text);
-              final serviceKm = int.tryParse(interval.text);
-
-              if (name.text.trim().isEmpty ||
-                  km == null ||
-                  km < 0 ||
-                  serviceKm == null ||
-                  serviceKm <= 0) {
-                ScaffoldMessenger.of(dialogContext).showSnackBar(
-                  const SnackBar(
-                    content: Text('Enter valid vehicle details'),
-                  ),
-                );
-                return;
-              }
-
-              Navigator.pop(dialogContext, {
-                'name': name.text.trim(),
-                'registration': registration.text.trim(),
-                'mileage': km,
-                'interval': serviceKm,
-                'lastService': km,
-                'history': <Map<String, dynamic>>[],
-              });
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-
-    
-Future.delayed(const Duration(milliseconds: 500), () {
-  name.dispose();
-  registration.dispose();
-  mileage.dispose();
-  interval.dispose();
-});
-
-
-    if (result != null) {
-      setState(() => vehicles.add(result));
-      await saveVehicles();
-    }
-  }
-
-  Future<void> updateMileage(int index) async {
-    final controller = TextEditingController(
-      text: '${vehicles[index]['mileage']}',
-    );
-
-    final result = await showDialog<int>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Update Mileage'),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'Current Mileage (km)',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final km = int.tryParse(controller.text);
-              final oldKm = vehicles[index]['mileage'] as int;
-
-              if (km == null || km < oldKm) {
-                ScaffoldMessenger.of(dialogContext).showSnackBar(
-                  const SnackBar(
-                    content: Text('Mileage cannot decrease'),
-                  ),
-                );
-                return;
-              }
-              Navigator.pop(dialogContext, km);
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-
-    controller.dispose();
-
-    if (result != null) {
-      setState(() => vehicles[index]['mileage'] = result);
-      await saveVehicles();
-    }
-  }
-
-  Future<void> addService(int index) async {
-    final description = TextEditingController();
-    final cost = TextEditingController();
-    final kmController = TextEditingController(
-      text: '${vehicles[index]['mileage']}',
-    );
-
-    final result = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Add Service'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: description,
-                decoration: const InputDecoration(
-                  labelText: 'Service Description',
-                ),
-              ),
-              TextField(
-                controller: kmController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Mileage at Service',
-                ),
-              ),
-              TextField(
-                controller: cost,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Cost',
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final km = int.tryParse(kmController.text);
-              final amount = double.tryParse(cost.text);
-
-              if (description.text.trim().isEmpty ||
-                  km == null ||
-                  km < 0 ||
-                  amount == null ||
-                  amount < 0) {
-                ScaffoldMessenger.of(dialogContext).showSnackBar(
-                  const SnackBar(
-                    content: Text('Enter valid service details'),
-                  ),
-                );
-                return;
-              }
-
-              Navigator.pop(dialogContext, {
-                'description': description.text.trim(),
-                'mileage': km,
-                'cost': amount,
-                'date': DateTime.now().toIso8601String(),
-              });
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-
-    description.dispose();
-    cost.dispose();
-    kmController.dispose();
-
-    if (result != null) {
+  Future<void> reload() async {
+    if (mounted) setState(() { loading = true; error = null; });
+    try {
+      final l = await client.from('job_card_labour').select().eq('business_id', widget.businessId).eq('job_card_id', widget.jobCardId).order('created_at');
+      final p = await client.from('job_card_parts').select().eq('business_id', widget.businessId).eq('job_card_id', widget.jobCardId).order('created_at');
+      final s = await client.from('staff').select('id, full_name').eq('business_id', widget.businessId).order('full_name');
+      final result = await client.rpc('job_card_financial_summary', params: {'p_job_card_id': widget.jobCardId});
+      if (result is! List || result.length != 1) throw StateError('Financial summary unavailable. Check owner permissions.');
+      if (!mounted) return;
       setState(() {
-        final history = vehicles[index]['history'] as List;
-        history.insert(0, result);
-
-        final serviceKm = result['mileage'] as int;
-        vehicles[index]['lastService'] = serviceKm;
-
-        if (serviceKm > (vehicles[index]['mileage'] as int)) {
-          vehicles[index]['mileage'] = serviceKm;
-        }
+        labour = List<Map<String, dynamic>>.from(l);
+        parts = List<Map<String, dynamic>>.from(p);
+        staff = List<Map<String, dynamic>>.from(s);
+        summary = Map<String, dynamic>.from(result.first as Map);
       });
-      await saveVehicles();
-    }
+    } catch (e) { if (mounted) setState(() => error = e.toString()); }
+    finally { if (mounted) setState(() => loading = false); }
   }
 
-  void openVehicle(int index) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => VehiclePage(
-          vehicle: vehicles[index],
-          onMileage: () => updateMileage(index),
-          onService: () => addService(index),
-        ),
-      ),
-    ).then((_) {
-      if (mounted) setState(() {});
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('AutoKeep'),
-        centerTitle: true,
-      ),
-      body: loading
-          ? const Center(child: CircularProgressIndicator())
-          : vehicles.isEmpty
-              ? const Center(
-                  child: Text(
-                    'No vehicles yet.\nTap + to add your first vehicle.',
-                    textAlign: TextAlign.center,
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(12),
-                  itemCount: vehicles.length,
-                  itemBuilder: (context, index) {
-                    final v = vehicles[index];
-                    final current = v['mileage'] as int;
-                    final next = (v['lastService'] as int) +
-                        (v['interval'] as int);
-                    final remaining = next - current;
-
-                    return Card(
-                      child: ListTile(
-                        leading: const Icon(Icons.directions_car),
-                        title: Text('${v['name']}'),
-                        subtitle: Text(
-                          '${v['registration']}\n'
-                          'Current: $current km | Next: $next km',
-                        ),
-                        isThreeLine: true,
-                        trailing: Icon(
-                          remaining <= 0
-                              ? Icons.warning_amber
-                              : Icons.chevron_right,
-                          color: remaining <= 0 ? Colors.red : null,
-                        ),
-                        onTap: () => openVehicle(index),
-                      ),
-                    );
-                  },
-                ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: addVehicle,
-        icon: const Icon(Icons.add),
-        label: const Text('Add Vehicle'),
-      ),
-    );
-  }
-}
-
-class VehiclePage extends StatelessWidget {
-  final Map<String, dynamic> vehicle;
-  final VoidCallback onMileage;
-  final VoidCallback onService;
-
-  const VehiclePage({
-    super.key,
-    required this.vehicle,
-    required this.onMileage,
-    required this.onService,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final current = vehicle['mileage'] as int;
-    final next = (vehicle['lastService'] as int) +
-        (vehicle['interval'] as int);
-    final remaining = next - current;
-    final history = vehicle['history'] as List;
-
-    return Scaffold(
-      appBar: AppBar(title: Text('${vehicle['name']}')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${vehicle['name']}',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  Text('Registration: ${vehicle['registration']}'),
-                  Text('Current Mileage: $current km'),
-                  Text('Next Service: $next km'),
-                  const SizedBox(height: 8),
-                  Text(
-                    remaining <= 0
-                        ? 'SERVICE DUE'
-                        : '$remaining km until next service',
-                    style: TextStyle(
-                      color: remaining <= 0
-                          ? Colors.red
-                          : Colors.green,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+  Future<void> addEntry(bool isLabour) async {
+    final description = TextEditingController();
+    final quantity = TextEditingController(text: '1');
+    final cost = TextEditingController(text: '0');
+    final sell = TextEditingController(text: '0');
+    final partNumber = TextEditingController();
+    String? selectedStaff;
+    final form = GlobalKey<FormState>();
+    final data = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, update) => AlertDialog(
+        title: Text(isLabour ? 'Add Labour' : 'Add Part'),
+        content: SizedBox(width: 460, child: SingleChildScrollView(child: Form(key: form, child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (isLabour) DropdownButtonFormField<String>(
+            value: selectedStaff,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Employee (optional)'),
+            items: [const DropdownMenuItem<String>(value: null, child: Text('Not assigned')),
+              ...staff.map((s) => DropdownMenuItem<String>(value: s['id'].toString(), child: Text(s['full_name'].toString())))],
+            onChanged: (v) => update(() => selectedStaff = v),
           ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: () {
-              onMileage();
-              Navigator.pop(context);
-            },
-            icon: const Icon(Icons.speed),
-            label: const Text('Update Mileage'),
-          ),
-          FilledButton.icon(
-            onPressed: () {
-              onService();
-              Navigator.pop(context);
-            },
-            icon: const Icon(Icons.build),
-            label: const Text('Add Service'),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Service History',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: 8),
-          if (history.isEmpty)
-            const Text('No services recorded yet.'),
-          ...history.map((record) {
-            final item = Map<String, dynamic>.from(record as Map);
-            final date = DateTime.tryParse('${item['date']}');
-            final dateText = date == null
-                ? ''
-                : '${date.day}/${date.month}/${date.year}';
-
-            return Card(
-              child: ListTile(
-                title: Text('${item['description']}'),
-                subtitle: Text(
-                  '$dateText | ${item['mileage']} km',
-                ),
-                trailing: Text(
-                  '${(item['cost'] as num).toStringAsFixed(2)}',
-                ),
-              ),
-            );
-          }),
+          if (!isLabour) TextFormField(controller: partNumber, decoration: const InputDecoration(labelText: 'Part number (optional)')),
+          TextFormField(controller: description, decoration: const InputDecoration(labelText: 'Description *'),
+            validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null),
+          TextFormField(controller: quantity, keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(labelText: isLabour ? 'Hours *' : 'Quantity *'),
+            validator: (v) { final n = num.tryParse((v ?? '').replaceAll(',', '.')); return n == null || (isLabour ? n < 0 : n <= 0) ? 'Enter valid number' : null; }),
+          TextFormField(controller: cost, keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(labelText: isLabour ? 'Internal cost / hour (${widget.currency})' : 'Purchase price / unit (${widget.currency})'),
+            validator: validatePrice),
+          TextFormField(controller: sell, keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(labelText: isLabour ? 'Customer rate / hour (${widget.currency})' : 'Selling price / unit (${widget.currency})'),
+            validator: validatePrice),
+        ])))),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () {
+            if (!form.currentState!.validate()) return;
+            final q = num.parse(quantity.text.replaceAll(',', '.'));
+            final c = (num.parse(cost.text.replaceAll(',', '.')) * 100).round();
+            final s = (num.parse(sell.text.replaceAll(',', '.')) * 100).round();
+            Navigator.pop(ctx, {
+              'business_id': widget.businessId, 'job_card_id': widget.jobCardId,
+              'description': description.text.trim(),
+              if (isLabour) ...{'staff_id': selectedStaff, 'hours': q, 'cost_rate_minor': c, 'sell_rate_minor': s}
+              else ...{'part_number': partNumber.text.trim().isEmpty ? null : partNumber.text.trim(), 'quantity': q, 'cost_price_minor': c, 'sell_price_minor': s},
+            });
+          }, child: const Text('Add')),
         ],
-      ),
+      )),
     );
+    description.dispose(); quantity.dispose(); cost.dispose(); sell.dispose(); partNumber.dispose();
+    if (data == null || !mounted) return;
+    setState(() => busy = true);
+    try {
+      await client.from(isLabour ? 'job_card_labour' : 'job_card_parts').insert(data);
+      await reload();
+    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: $e'))); }
+    finally { if (mounted) setState(() => busy = false); }
   }
+
+  String? validatePrice(String? v) {
+    final n = num.tryParse((v ?? '').replaceAll(',', '.'));
+    if (n == null || n < 0 || n > 100000000) return 'Enter a valid non-negative price';
+    return null;
+  }
+
+  Future<void> remove(bool isLabour, String id) async {
+    final confirmed = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Delete entry?'), content: const Text('This cannot be undone.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete'))],
+    ));
+    if (confirmed != true || !mounted) return;
+    setState(() => busy = true);
+    try {
+      final deleted = await client.from(isLabour ? 'job_card_labour' : 'job_card_parts')
+          .delete().eq('id', id).eq('business_id', widget.businessId).eq('job_card_id', widget.jobCardId).select('id');
+      if (deleted.isEmpty) throw StateError('No row deleted. Check permissions.');
+      await reload();
+    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $e'))); }
+    finally { if (mounted) setState(() => busy = false); }
+  }
+
+  Widget total(String label, String key) => Padding(padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+      Text(label), Text(money(asNum(summary?[key])), style: const TextStyle(fontWeight: FontWeight.bold)),
+    ]));
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Job Card • Labour & Parts'), actions: [IconButton(onPressed: busy ? null : reload, icon: const Icon(Icons.refresh))]),
+    body: loading ? const Center(child: CircularProgressIndicator()) : error != null
+      ? Center(child: Padding(padding: const EdgeInsets.all(20), child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(error!), const SizedBox(height: 12), FilledButton(onPressed: reload, child: const Text('Retry')),
+        ])))
+      : ListView(padding: const EdgeInsets.all(16), children: [
+          Text('Labour', style: Theme.of(context).textTheme.titleLarge),
+          for (final l in labour) Card(child: ListTile(
+            title: Text(l['description'].toString()),
+            subtitle: Text('${l['hours']} hours • Cost ${fmt(l['hours'], l['cost_rate_minor'])} • Sell ${fmt(l['hours'], l['sell_rate_minor'])}'),
+            trailing: IconButton(onPressed: busy ? null : () => remove(true, l['id'].toString()), icon: const Icon(Icons.delete_outline)),
+          )),
+          if (labour.isEmpty) const Text('No labour recorded yet.'),
+          OutlinedButton.icon(onPressed: busy ? null : () => addEntry(true), icon: const Icon(Icons.add), label: const Text('Add Labour')),
+          const SizedBox(height: 22),
+          Text('Parts', style: Theme.of(context).textTheme.titleLarge),
+          for (final p in parts) Card(child: ListTile(
+            title: Text(p['description'].toString()),
+            subtitle: Text('${p['part_number'] ?? 'No part number'} • Qty ${p['quantity']}\nCost ${fmt(p['quantity'], p['cost_price_minor'])} • Sell ${fmt(p['quantity'], p['sell_price_minor'])}'),
+            isThreeLine: true,
+            trailing: IconButton(onPressed: busy ? null : () => remove(false, p['id'].toString()), icon: const Icon(Icons.delete_outline)),
+          )),
+          if (parts.isEmpty) const Text('No parts recorded yet.'),
+          OutlinedButton.icon(onPressed: busy ? null : () => addEntry(false), icon: const Icon(Icons.add), label: const Text('Add Part')),
+          const SizedBox(height: 22),
+          Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Owner financial summary', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            total('Labour cost', 'labour_cost'), total('Labour sell', 'labour_sell'),
+            total('Parts cost', 'parts_cost'), total('Parts sell', 'parts_sell'),
+            const Divider(), total('Total internal cost', 'total_cost'),
+            total('Customer total', 'total_sell'), total('Gross profit', 'gross_profit'),
+            Text('Gross margin: ${asNum(summary?['gross_margin_percent']).toStringAsFixed(2)}%'),
+            const SizedBox(height: 8),
+            const Text('Excludes VAT, overheads and other expenses.'),
+          ]))),
+        ]),
+  );
 }
