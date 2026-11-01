@@ -158,6 +158,12 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> addVehicle() async {
+    // Free users may register one vehicle. Existing data is never deleted.
+    if (vehicles.isNotEmpty) {
+      await Navigator.push<void>(context,
+          MaterialPageRoute(builder: (_) => const UpgradePage()));
+      return;
+    }
     final created = await Navigator.push<Vehicle>(context,
         MaterialPageRoute(builder: (_) => const VehicleFormPage()));
     if (created == null || !mounted) return;
@@ -576,4 +582,50 @@ class _ServiceFormPageState extends State<ServiceFormPage> {
       FilledButton(onPressed: save, child: const Text('Save Service')),
     ]),
   );
+}
+
+// Preview of the paid tier. No purchases are charged in this test build.
+// Before launch, integrate Google Play Billing and verify entitlements.
+class UpgradePage extends StatelessWidget {
+  const UpgradePage({super.key});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('AutoKeep Pro')),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.workspace_premium, size: 72),
+                  const SizedBox(height: 16),
+                  Text('Upgrade to AutoKeep Pro',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.headlineSmall),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'The free plan includes one vehicle. '
+                    'Pro will allow unlimited vehicles.',
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 18),
+                  Text('Planned price: R39.99 / month',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  const Text('Subscriptions are not yet available in this test version.',
+                      textAlign: TextAlign.center),
+                  const SizedBox(height: 24),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Back to my vehicle'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
 }
