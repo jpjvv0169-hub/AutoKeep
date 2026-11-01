@@ -327,7 +327,7 @@ class _HomePageState extends State<HomePage> {
       ),
     );
 
-    controller.dispose();
+    // controller.dispose();
 
     if (input == null || input.trim().isEmpty || !mounted) {
       return;
