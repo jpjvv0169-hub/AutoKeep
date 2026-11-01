@@ -36,7 +36,6 @@ jobs:
       - name: Generate AutoKeep app icon
         run: dart run flutter_launcher_icons
 
-
       - name: Restore signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.AUTOKEEP_KEYSTORE_BASE64 }}
@@ -45,11 +44,41 @@ jobs:
             echo "Signing key is not configured."
             exit 1
           fi
+
           mkdir -p "$HOME/.android"
-          echo "$KEYSTORE_BASE64" | base64 --decode > "$HOME/.android/debug.keystore"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$HOME/.android/debug.keystore"
+
+          test -s "$HOME/.android/debug.keystore"
+
+      - name: Show signing key certificate
+        run: |
+          echo "===== KEYSTORE CERTIFICATE ====="
+          keytool -list -v \
+            -keystore "$HOME/.android/debug.keystore" \
+            -alias androiddebugkey \
+            -storepass android \
+            -keypass android \
+            | grep -E "Alias name:|SHA1:|SHA256:"
 
       - name: Build debug APK
         run: flutter build apk --debug
+
+      - name: Check APK signature
+        run: |
+          echo "===== APK SIGNATURE ====="
+
+          APK="build/app/outputs/flutter-apk/app-debug.apk"
+
+          test -f "$APK"
+
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+
+          "$APKSIGNER" verify \
+            --print-certs \
+            "$APK"
+
+          echo "===== APK SHA256 ====="
+          sha256sum "$APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
