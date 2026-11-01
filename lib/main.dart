@@ -538,54 +538,127 @@ subtitle: Column(
   }
 }
 
-class ProPage extends StatelessWidget {
+
+class ProPage extends StatefulWidget {
   const ProPage({super.key});
+
+  @override
+  State<ProPage> createState() => _ProPageState();
+}
+
+class _ProPageState extends State<ProPage> {
+  final InAppPurchase _billing = InAppPurchase.instance;
+
+  ProductDetails? _proProduct;
+  bool _loading = true;
+  String _message = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProProduct();
+  }
+
+  Future<void> _loadProProduct() async {
+    try {
+      final available = await _billing.isAvailable();
+
+      if (!available) {
+        if (!mounted) return;
+        setState(() {
+          _loading = false;
+          _message = 'Google Play billing is not available.';
+        });
+        return;
+      }
+
+      final response = await _billing.queryProductDetails(
+        {autoKeepProProductId},
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _loading = false;
+        if (response.productDetails.isNotEmpty) {
+          _proProduct = response.productDetails.first;
+        } else {
+          _message =
+              'AutoKeep Pro is not available yet.';
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _message = 'Unable to load subscription details.';
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('AutoKeep Pro')),
-      body: const Padding(
-        padding: EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Icon(
-              Icons.workspace_premium,
-              size: 80,
-              color: Color(0xFF006D63),
-            ),
-            SizedBox(height: 20),
-            Text(
-              'Free includes 1 vehicle',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
+      appBar: AppBar(
+        title: const Text('AutoKeep Pro'),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.workspace_premium,
+                size: 80,
+                color: Color(0xFF006D63),
               ),
-            ),
-            SizedBox(height: 16),
-            Text(
-              'Upgrade to AutoKeep Pro for unlimited vehicles.',
-              textAlign: TextAlign.center,
-            ),
-            SizedBox(height: 16),
-            Text(
-              'Pro pricing will be shown in your local currency once available.',
-              textAlign: TextAlign.center,
-            ),
-            SizedBox(height: 24),
-            Text(
-              'Subscriptions are not active in this test build. '
-              'No payment will be taken.',
-              textAlign: TextAlign.center,
-            ),
-          ],
+              const SizedBox(height: 20),
+              const Text(
+                'Free includes 1 vehicle',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Upgrade to AutoKeep Pro for unlimited vehicles.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              if (_loading)
+                const CircularProgressIndicator()
+              else if (_proProduct != null)
+                Text(
+                  'Monthly subscription: ${_proProduct!.price}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                )
+              else
+                Text(
+                  _message,
+                  textAlign: TextAlign.center,
+                ),
+              const SizedBox(height: 20),
+              const Text(
+                'Subscriptions are not active yet. '
+                'No payment will be taken.',
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
+
+
 
 class VehicleForm extends StatefulWidget {
   final Vehicle? vehicle;
