@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
+import 'package:in_app_purchase/in_app_purchase.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const AutoKeepApp());
