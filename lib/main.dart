@@ -1,6 +1,6 @@
 
 import 'dart:convert';
-
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -550,14 +550,26 @@ class _ProPageState extends State<ProPage> {
   final InAppPurchase _billing = InAppPurchase.instance;
 
   ProductDetails? _proProduct;
+  StreamSubscription<List<PurchaseDetails>>? _purchaseSubscription;
   bool _loading = true;
   String _message = '';
 
-  @override
-  void initState() {
-    super.initState();
-    _loadProProduct();
-  }
+ @override
+void initState() {
+  super.initState();
+
+  _purchaseSubscription = _billing.purchaseStream.listen(
+    _handlePurchaseUpdates,
+    onError: (Object error) {
+      if (!mounted) return;
+      setState(() {
+        _message = 'Unable to check purchases.';
+      });
+    },
+  );
+
+  _loadProProduct();
+}
 
   Future<void> _loadProProduct() async {
     try {
@@ -595,7 +607,43 @@ class _ProPageState extends State<ProPage> {
       });
     }
   }
+  Future<void> _handlePurchaseUpdates(
+    List<PurchaseDetails> purchases,
+  ) async {
+    for (final purchase in purchases) {
+      if (purchase.productID != autoKeepProProductId) {
+        continue;
+      }
 
+      if (purchase.status == PurchaseStatus.error) {
+        if (mounted) {
+          setState(() {
+            _message = 'Purchase failed. Please try again.';
+          });
+        }
+      }
+
+      if (purchase.status == PurchaseStatus.purchased ||
+          purchase.status == PurchaseStatus.restored) {
+        // TODO: Verify the purchase securely before unlocking Pro.
+        if (mounted) {
+          setState(() {
+            _message = 'Purchase received. Verification pending.';
+          });
+        }
+      }
+
+      if (purchase.pendingCompletePurchase) {
+        await _billing.completePurchase(purchase);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _purchaseSubscription?.cancel();
+    super.dispose();
+  }
   @override
   Widget build(BuildContext context) {
     return Scaffold(
