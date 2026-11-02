@@ -607,35 +607,51 @@ void initState() {
       });
     }
   }
+  Future<void> _startPurchase() async {
+    final product = _proProduct;
+    if (product == null) return;
+    try {
+      final param = PurchaseParam(productDetails: product);
+      await _billing.buyNonConsumable(purchaseParam: param);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _message = 'Could not start purchase. Please try again.');
+    }
+  }
+
+  Future<void> _restorePurchases() async {
+    try {
+      await _billing.restorePurchases();
+      if (!mounted) return;
+      setState(() => _message = 'Checking Google Play purchases...');
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _message = 'Could not restore purchases.');
+    }
+  }
+
   Future<void> _handlePurchaseUpdates(
     List<PurchaseDetails> purchases,
   ) async {
     for (final purchase in purchases) {
-      if (purchase.productID != autoKeepProProductId) {
-        continue;
-      }
-
-      if (purchase.status == PurchaseStatus.error) {
-        if (mounted) {
-          setState(() {
-            _message = 'Purchase failed. Please try again.';
-          });
-        }
-      }
-
-      if (purchase.status == PurchaseStatus.purchased ||
+      if (purchase.productID != autoKeepProProductId) continue;
+      if (!mounted) return;
+      if (purchase.status == PurchaseStatus.pending) {
+        setState(() => _message = 'Waiting for Google Play payment...');
+      } else if (purchase.status == PurchaseStatus.error) {
+        setState(() => _message = 'Purchase failed. Please try again.');
+      } else if (purchase.status == PurchaseStatus.canceled) {
+        setState(() => _message = 'Purchase cancelled.');
+      } else if (purchase.status == PurchaseStatus.purchased ||
           purchase.status == PurchaseStatus.restored) {
-        // TODO: Verify the purchase securely before unlocking Pro.
-        if (mounted) {
-          setState(() {
-            _message = 'Purchase received. Verification pending.';
-          });
-        }
+        // IMPORTANT: Never grant Pro until a trusted server has verified
+        // the Google Play purchase token and active subscription state.
+        setState(() => _message =
+            'Purchase received. Secure verification is not set up yet. '
+            'Pro is not unlocked.');
       }
-
-      if (purchase.pendingCompletePurchase) {
-        await _billing.completePurchase(purchase);
-      }
+      // Production: complete only after verification / entitlement handling.
+      // Keep this pending until the secure verifier is implemented.
     }
   }
 
@@ -693,9 +709,21 @@ void initState() {
                   textAlign: TextAlign.center,
                 ),
               const SizedBox(height: 20),
+              if (_proProduct != null)
+                FilledButton(
+                  onPressed: null,
+                  child: const Text('Upgrade to Pro'),
+                ),
+              OutlinedButton(
+                onPressed: _restorePurchases,
+                child: const Text('Restore Purchases'),
+              ),
+              if (_message.isNotEmpty && _proProduct != null)
+                Text(_message, textAlign: TextAlign.center),
+              const SizedBox(height: 12),
               const Text(
-                'Subscriptions are not active yet. '
-                'No payment will be taken.',
+                'Pro access requires secure Google Play verification. '
+                'Do not make a real payment during this development stage.',
                 textAlign: TextAlign.center,
               ),
             ],
